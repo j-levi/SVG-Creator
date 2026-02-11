@@ -1,16 +1,61 @@
 {
-  "name": "image-to-svg",
+  "name": "vectorforge",
+  "productName": "VectorForge",
   "version": "1.0.0",
   "description": "Convert any image to high-quality SVG — optimized for logos",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "make-icons": "node scripts/make-icons.js"
   },
   "author": "",
   "license": "MIT",
+  "build": {
+    "appId": "com.vectorforge.app",
+    "productName": "VectorForge",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "converter/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": "nsis"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": "AppImage",
+      "category": "Graphics"
+    },
+    "dmg": {
+      "title": "VectorForge",
+      "backgroundColor": "#0a0a0f"
+    }
+  },
   "devDependencies": {
-    "electron": "^28.0.0"
+    "electron": "^28.0.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "potrace": "^2.1.8",

@@ -44,6 +44,25 @@ npm start
 
 The app window will open — drag an image in and start converting.
 
+### 4. Build as a native desktop app (optional)
+
+```bash
+# macOS — creates VectorForge.app in dist/mac/
+npm run build:mac
+
+# Windows
+npm run build:win
+
+# Linux
+npm run build:linux
+```
+
+On macOS, copy the built app to Applications:
+
+```bash
+cp -R dist/mac/VectorForge.app /Applications/
+```
+
 ---
 
 ## 🏗 Project Structure
@@ -57,6 +76,11 @@ The app window will open — drag an image in and start converting.
 │   ├── index.html          # App UI layout
 │   ├── styles.css          # Premium dark theme
 │   └── renderer.js         # UI logic, drag-drop, preview, export
+├── build/
+│   ├── icon.png            # Source app icon
+│   └── icon.icns           # macOS icon bundle
+├── scripts/
+│   └── make-icons.js       # Regenerate icon assets
 ├── package.json
 ├── LICENSE                 # MIT
 └── .gitignore

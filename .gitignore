@@ -8,7 +8,10 @@ Thumbs.db
 # Electron build output
 dist/
 out/
-build/
+
+# Build intermediates (keep build/icon.png and build/icon.icns)
+build/icon.iconset/
+build/icon_real.png
 
 # Logs
 *.log
