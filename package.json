@@ -1,0 +1,19 @@
+{
+  "name": "image-to-svg",
+  "version": "1.0.0",
+  "description": "Convert any image to high-quality SVG — optimized for logos",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  },
+  "dependencies": {
+    "potrace": "^2.1.8",
+    "sharp": "^0.33.2"
+  }
+}
