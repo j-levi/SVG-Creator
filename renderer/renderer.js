@@ -1,5 +1,6 @@
 /* ═════════════════════════════════════════════════════════════
    VectorForge – Renderer
+   Supports: raster→SVG conversion AND direct SVG editing
    ════════════════════════════════════════════════════════════ */
 
 // ─── DOM refs ──────────────────────────────────────────────
@@ -14,6 +15,7 @@ const btnCrop = document.getElementById('btn-crop');
 const btnExport = document.getElementById('btn-export');
 const btnNew = document.getElementById('btn-new');
 const toast = document.getElementById('toast');
+const paneOriginal = document.getElementById('pane-original');
 
 const cropOverlay = document.getElementById('crop-overlay');
 const cropRect = document.getElementById('crop-rect');
@@ -37,12 +39,13 @@ const valResolution = document.getElementById('val-resolution');
 const sectionColors = document.getElementById('section-colors');
 const sectionThreshold = document.getElementById('section-threshold');
 const modeBtns = document.querySelectorAll('.mode-btn');
+const sidebar = document.getElementById('sidebar');
 
 // ─── State ─────────────────────────────────────────────────
 let currentFilePath = null;
 let currentSvgString = null;
 let currentMode = 'color';
-let isCropping = false;
+let isSvgMode = false;   // true when user imported an SVG directly
 let cropStart = null;
 
 // ─── Slider value display ──────────────────────────────────
@@ -86,21 +89,79 @@ dropzone.addEventListener('drop', async (e) => {
         showToast('Could not read file path', 'error');
         return;
     }
-    await loadImage(filePath);
+    await handleFile(filePath);
 });
 
 // ─── Browse button ─────────────────────────────────────────
 btnBrowse.addEventListener('click', async () => {
     const filePath = await window.api.openFileDialog();
-    if (filePath) await loadImage(filePath);
+    if (filePath) await handleFile(filePath);
 });
 
-// ─── Load image ────────────────────────────────────────────
+// ─── Handle file (detect SVG vs raster) ────────────────────
+async function handleFile(filePath) {
+    const ext = filePath.split('.').pop().toLowerCase();
+
+    if (ext === 'svg') {
+        await loadSvg(filePath);
+    } else {
+        await loadImage(filePath);
+    }
+}
+
+// ─── Load SVG directly (edit mode) ─────────────────────────
+async function loadSvg(filePath) {
+    currentFilePath = filePath;
+    isSvgMode = true;
+    currentSvgString = null;
+
+    const result = await window.api.readSvgFile(filePath);
+    if (!result.success) {
+        showToast('Failed to read SVG: ' + result.error, 'error');
+        return;
+    }
+
+    currentSvgString = result.svg;
+
+    // Hide original pane — not needed for SVG editing
+    paneOriginal.style.display = 'none';
+    document.querySelector('.preview-divider').style.display = 'none';
+
+    // Hide conversion sidebar sections (no need when editing SVG)
+    sidebar.querySelectorAll('.sidebar-section').forEach(s => s.style.display = 'none');
+
+    // Show SVG in preview
+    svgPreview.innerHTML = currentSvgString;
+
+    // Enable buttons
+    btnExport.disabled = false;
+    btnCrop.disabled = false;
+    btnConvert.style.display = 'none'; // no conversion for SVG
+
+    // Show editor
+    dropzone.classList.add('hidden');
+    dropzone.classList.remove('active');
+    editor.classList.remove('hidden');
+
+    showToast('SVG loaded — use Crop or Export', 'success');
+}
+
+// ─── Load raster image ─────────────────────────────────────
 async function loadImage(filePath) {
     currentFilePath = filePath;
+    isSvgMode = false;
     currentSvgString = null;
     btnExport.disabled = true;
     btnCrop.disabled = true;
+
+    // Show original pane
+    paneOriginal.style.display = '';
+    document.querySelector('.preview-divider').style.display = '';
+
+    // Show conversion sidebar sections
+    sidebar.querySelectorAll('.sidebar-section').forEach(s => s.style.display = '');
+    updateModeVisibility();
+    btnConvert.style.display = '';
 
     const dataUrl = await window.api.getImageDataUrl(filePath);
     if (!dataUrl) {
@@ -108,7 +169,7 @@ async function loadImage(filePath) {
         return;
     }
     imgOriginal.src = dataUrl;
-    svgPreview.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">Generating SVG…</p>';
+    svgPreview.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">Click Apply Settings to generate SVG</p>';
 
     dropzone.classList.add('hidden');
     dropzone.classList.remove('active');
@@ -121,7 +182,7 @@ async function loadImage(filePath) {
 btnConvert.addEventListener('click', convertImage);
 
 async function convertImage() {
-    if (!currentFilePath) return;
+    if (!currentFilePath || isSvgMode) return;
 
     svgLoading.classList.remove('hidden');
     btnConvert.disabled = true;
@@ -175,11 +236,19 @@ btnExport.addEventListener('click', async () => {
 btnNew.addEventListener('click', () => {
     currentFilePath = null;
     currentSvgString = null;
+    isSvgMode = false;
     imgOriginal.src = '';
     svgPreview.innerHTML = '';
     btnExport.disabled = true;
     btnCrop.disabled = true;
     exitCropMode();
+
+    // Restore full UI
+    paneOriginal.style.display = '';
+    document.querySelector('.preview-divider').style.display = '';
+    sidebar.querySelectorAll('.sidebar-section').forEach(s => s.style.display = '');
+    updateModeVisibility();
+    btnConvert.style.display = '';
 
     editor.classList.add('hidden');
     dropzone.classList.remove('hidden');
@@ -203,7 +272,6 @@ btnCropApply.addEventListener('click', () => {
 });
 
 function enterCropMode() {
-    isCropping = true;
     cropOverlay.classList.add('active');
     cropToolbar.classList.add('visible');
     cropRect.style.display = 'none';
@@ -211,7 +279,6 @@ function enterCropMode() {
 }
 
 function exitCropMode() {
-    isCropping = false;
     cropOverlay.classList.remove('active');
     cropToolbar.classList.remove('visible');
     cropRect.style.display = 'none';
@@ -256,48 +323,63 @@ function applyCrop() {
     const svgEl = svgPreview.querySelector('svg');
     if (!svgEl) return;
 
-    const overlayRect = cropOverlay.getBoundingClientRect();
-    const svgRect = svgEl.getBoundingClientRect();
-    const cropRectEl = cropRect.getBoundingClientRect();
+    const cropRectBounds = cropRect.getBoundingClientRect();
+    const svgBounds = svgEl.getBoundingClientRect();
 
     // Bail if crop rect is too small
-    if (cropRectEl.width < 5 || cropRectEl.height < 5) {
+    if (cropRectBounds.width < 5 || cropRectBounds.height < 5) {
         showToast('Crop area too small', 'error');
         return;
     }
 
-    // Get the SVG viewBox
-    const vb = svgEl.viewBox.baseVal;
-    const svgW = vb.width || svgEl.width.baseVal.value;
-    const svgH = vb.height || svgEl.height.baseVal.value;
+    // Get the SVG viewBox or use width/height
+    let vbX = 0, vbY = 0, vbW, vbH;
+    if (svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width) {
+        const vb = svgEl.viewBox.baseVal;
+        vbX = vb.x; vbY = vb.y; vbW = vb.width; vbH = vb.height;
+    } else {
+        vbW = parseFloat(svgEl.getAttribute('width')) || svgBounds.width;
+        vbH = parseFloat(svgEl.getAttribute('height')) || svgBounds.height;
+    }
 
-    // Calculate scale from display to viewBox coordinates
-    const scaleX = svgW / svgRect.width;
-    const scaleY = svgH / svgRect.height;
+    // Scale from display pixels to viewBox units
+    const scaleX = vbW / svgBounds.width;
+    const scaleY = vbH / svgBounds.height;
 
-    // Crop rect position relative to the SVG element
-    const cx = (cropRectEl.left - svgRect.left) * scaleX + (vb.x || 0);
-    const cy = (cropRectEl.top - svgRect.top) * scaleY + (vb.y || 0);
-    const cw = cropRectEl.width * scaleX;
-    const ch = cropRectEl.height * scaleY;
+    // Crop rect relative to SVG element
+    const cx = (cropRectBounds.left - svgBounds.left) * scaleX + vbX;
+    const cy = (cropRectBounds.top - svgBounds.top) * scaleY + vbY;
+    const cw = cropRectBounds.width * scaleX;
+    const ch = cropRectBounds.height * scaleY;
 
-    // Clamp to SVG bounds
-    const newX = Math.max(0, cx);
-    const newY = Math.max(0, cy);
-    const newW = Math.min(cw, svgW - newX);
-    const newH = Math.min(ch, svgH - newY);
+    // Clamp
+    const newX = Math.max(vbX, cx);
+    const newY = Math.max(vbY, cy);
+    const newW = Math.min(cw, vbW - (newX - vbX));
+    const newH = Math.min(ch, vbH - (newY - vbY));
 
-    // Update the SVG viewBox to crop
+    if (newW < 1 || newH < 1) {
+        showToast('Invalid crop area', 'error');
+        return;
+    }
+
     const newViewBox = `${newX.toFixed(1)} ${newY.toFixed(1)} ${newW.toFixed(1)} ${newH.toFixed(1)}`;
 
-    currentSvgString = currentSvgString.replace(
-        /viewBox="[^"]*"/,
-        `viewBox="${newViewBox}"`
-    );
-    // Also update width/height attributes
-    currentSvgString = currentSvgString
-        .replace(/\bwidth="[^"]*"/, `width="${Math.round(newW)}"`)
-        .replace(/\bheight="[^"]*"/, `height="${Math.round(newH)}"`);
+    // Update viewBox in SVG string
+    if (/viewBox="[^"]*"/.test(currentSvgString)) {
+        currentSvgString = currentSvgString.replace(/viewBox="[^"]*"/, `viewBox="${newViewBox}"`);
+    } else {
+        // Insert viewBox if missing
+        currentSvgString = currentSvgString.replace(/<svg/, `<svg viewBox="${newViewBox}"`);
+    }
+
+    // Update width/height
+    if (/\bwidth="[^"]*"/.test(currentSvgString)) {
+        currentSvgString = currentSvgString.replace(/\bwidth="[^"]*"/, `width="${Math.round(newW)}"`);
+    }
+    if (/\bheight="[^"]*"/.test(currentSvgString)) {
+        currentSvgString = currentSvgString.replace(/\bheight="[^"]*"/, `height="${Math.round(newH)}"`);
+    }
 
     svgPreview.innerHTML = currentSvgString;
     showToast('SVG cropped ✓', 'success');

@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld('api', {
         ipcRenderer.invoke('save-svg', { svgString, defaultName }),
     getImageDataUrl: (filePath) =>
         ipcRenderer.invoke('get-image-data-url', filePath),
+    readSvgFile: (filePath) =>
+        ipcRenderer.invoke('read-svg-file', filePath),
 });

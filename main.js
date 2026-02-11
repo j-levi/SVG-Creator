@@ -19,7 +19,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    icon: path.join(__dirname, 'renderer', 'icon.png'),
+    icon: path.join(__dirname, 'build', 'icon.png'),
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -41,11 +41,14 @@ app.on('activate', () => {
 
 // ─── IPC Handlers ───────────────────────────────────────────
 
+// Open file dialog — accepts images AND SVG files
 ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select an Image',
+    title: 'Select an Image or SVG',
     filters: [
+      { name: 'All Supported', extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp', 'tiff', 'gif', 'svg'] },
       { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp', 'tiff', 'gif'] },
+      { name: 'SVG Files', extensions: ['svg'] },
     ],
     properties: ['openFile'],
   });
@@ -53,6 +56,7 @@ ipcMain.handle('open-file-dialog', async () => {
   return result.filePaths[0];
 });
 
+// Convert raster image to SVG
 ipcMain.handle('convert-image', async (_event, { filePath, options }) => {
   try {
     const svgString = await convertImageToSvg(filePath, options);
@@ -63,6 +67,7 @@ ipcMain.handle('convert-image', async (_event, { filePath, options }) => {
   }
 });
 
+// Save SVG to file
 ipcMain.handle('save-svg', async (_event, { svgString, defaultName }) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Save SVG',
@@ -78,6 +83,7 @@ ipcMain.handle('save-svg', async (_event, { svgString, defaultName }) => {
   }
 });
 
+// Read image as data URL for preview
 ipcMain.handle('get-image-data-url', async (_event, filePath) => {
   try {
     const buffer = fs.readFileSync(filePath);
@@ -86,5 +92,15 @@ ipcMain.handle('get-image-data-url', async (_event, filePath) => {
     return `data:${mime};base64,${buffer.toString('base64')}`;
   } catch (err) {
     return null;
+  }
+});
+
+// Read SVG file contents
+ipcMain.handle('read-svg-file', async (_event, filePath) => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return { success: true, svg: content };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
