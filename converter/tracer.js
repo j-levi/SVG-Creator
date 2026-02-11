@@ -14,19 +14,19 @@ const path = require('path');
  * @param {number}  opts.turdSize      – suppress speckles smaller than this (px²)
  * @param {number}  opts.optTolerance  – curve optimisation tolerance
  * @param {boolean} opts.invert        – invert colours before tracing
- * @param {number}  opts.resolution    – max dimension to process (default 2048)
+ * @param {number}  opts.resolution    – max dimension to process (default 4096)
  * @returns {Promise<string>} SVG markup
  */
 async function convertImageToSvg(filePath, opts = {}) {
     const {
         mode = 'color',
-        numColors = 8,
+        numColors = 16,
         threshold = 128,
         turnPolicy = potrace.Potrace.TURNPOLICY_MINORITY,
         turdSize = 2,
         optTolerance = 0.2,
         invert = false,
-        resolution = 2048,
+        resolution = 4096,
     } = opts;
 
     // ── 1. Preprocess with Sharp ────────────────────────────────────
@@ -44,8 +44,8 @@ async function convertImageToSvg(filePath, opts = {}) {
         });
     }
 
-    // Sharpen for crisper edges (important for logo tracing)
-    pipeline = pipeline.sharpen({ sigma: 1.2 });
+    // Gentle sharpen — too much creates tracing artifacts
+    pipeline = pipeline.sharpen({ sigma: 0.8 });
 
     if (mode === 'bw') {
         return await traceBW(pipeline, { threshold, turnPolicy, turdSize, optTolerance, invert });
@@ -109,28 +109,56 @@ async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolera
     const processed = pipeline.png();
     const { data: rawBuf, info } = await processed.raw().toBuffer({ resolveWithObject: true });
     const { width, height, channels } = info;
+    const totalPixels = width * height;
 
-    // Quantize colours using k-means
+    // Quantize colours using k-means with more samples and iterations
     const palette = quantize(rawBuf, channels, numColors);
 
-    // Build layers: one greyscale bitmap per colour
-    const layers = palette.map((color) => {
-        const bitmapBuf = Buffer.alloc(width * height);
-        for (let i = 0; i < width * height; i++) {
-            const off = i * channels;
-            const r = rawBuf[off], g = rawBuf[off + 1], b = rawBuf[off + 2];
-            const a = channels === 4 ? rawBuf[off + 3] : 255;
-            // Assign pixel to nearest palette colour
-            const nearest = nearestColor(r, g, b, palette);
-            bitmapBuf[i] = (nearest === color && a > 128) ? 0 : 255; // 0 = foreground
+    // Assign every pixel to a palette colour (full pass, not sampled)
+    const assignments = new Uint8Array(totalPixels);
+    for (let i = 0; i < totalPixels; i++) {
+        const off = i * channels;
+        const r = rawBuf[off], g = rawBuf[off + 1], b = rawBuf[off + 2];
+        const a = channels === 4 ? rawBuf[off + 3] : 255;
+        if (a < 128) {
+            assignments[i] = 255; // transparent
+        } else {
+            assignments[i] = nearestColorIndex(r, g, b, palette);
         }
-        return { color, bitmap: bitmapBuf };
+    }
+
+    // Find the background colour (most frequent) to render first
+    const freq = new Uint32Array(palette.length);
+    for (let i = 0; i < totalPixels; i++) {
+        if (assignments[i] < palette.length) freq[assignments[i]]++;
+    }
+    let bgIndex = 0;
+    for (let i = 1; i < palette.length; i++) {
+        if (freq[i] > freq[bgIndex]) bgIndex = i;
+    }
+
+    // Order layers: background first, then rest by frequency (desc)
+    const layerOrder = Array.from({ length: palette.length }, (_, i) => i);
+    layerOrder.sort((a, b) => {
+        if (a === bgIndex) return -1;
+        if (b === bgIndex) return 1;
+        return freq[b] - freq[a];
     });
 
-    // Trace each layer
+    // Build layers: one greyscale bitmap per colour
     const pathsSvg = [];
-    for (const layer of layers) {
-        const greyPng = await sharp(layer.bitmap, { raw: { width, height, channels: 1 } })
+
+    for (const ci of layerOrder) {
+        const color = palette[ci];
+        // Skip colours with very few pixels
+        if (freq[ci] < 10) continue;
+
+        const bitmapBuf = Buffer.alloc(width * height);
+        for (let i = 0; i < totalPixels; i++) {
+            bitmapBuf[i] = assignments[i] === ci ? 0 : 255; // 0 = foreground
+        }
+
+        const greyPng = await sharp(bitmapBuf, { raw: { width, height, channels: 1 } })
             .png()
             .toBuffer();
 
@@ -140,7 +168,7 @@ async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolera
                 turnPolicy,
                 turdSize,
                 optTolerance,
-                color: rgbToHex(layer.color),
+                color: rgbToHex(color),
                 background: 'transparent',
             }, (err, svg) => {
                 if (err) return reject(err);
@@ -153,39 +181,52 @@ async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolera
         if (pathMatch) pathsSvg.push(...pathMatch);
     }
 
+    // The first layer (background) is rendered as a full rect to prevent gaps
+    const bgColor = rgbToHex(palette[bgIndex]);
+    const bgRect = `<rect width="${width}" height="${height}" fill="${bgColor}"/>`;
+
     // Compose final SVG
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n${pathsSvg.join('\n')}\n</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n${bgRect}\n${pathsSvg.join('\n')}\n</svg>`;
 }
 
 // ─── Colour helpers ─────────────────────────────────────────────
 
-function nearestColor(r, g, b, palette) {
+function nearestColorIndex(r, g, b, palette) {
     let minDist = Infinity;
-    let best = palette[0];
-    for (const c of palette) {
+    let bestIdx = 0;
+    for (let i = 0; i < palette.length; i++) {
+        const c = palette[i];
         const dr = r - c[0], dg = g - c[1], db = b - c[2];
         const d = dr * dr + dg * dg + db * db;
-        if (d < minDist) { minDist = d; best = c; }
+        if (d < minDist) { minDist = d; bestIdx = i; }
     }
-    return best;
+    return bestIdx;
+}
+
+function nearestColor(r, g, b, palette) {
+    return palette[nearestColorIndex(r, g, b, palette)];
 }
 
 function rgbToHex([r, g, b]) {
     return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 
-// ─── Simple k-means colour quantization ─────────────────────────
+// ─── Improved k-means colour quantization ───────────────────────
 
 function quantize(buffer, channels, k) {
-    // Sample up to 20 000 random pixels for speed
     const totalPixels = buffer.length / channels;
-    const sampleSize = Math.min(totalPixels, 20000);
+    // Sample up to 80,000 pixels for much better colour accuracy
+    const sampleSize = Math.min(totalPixels, 80000);
     const samples = [];
-    for (let i = 0; i < sampleSize; i++) {
-        const idx = Math.floor(Math.random() * totalPixels) * channels;
+
+    // Use stratified sampling for better coverage
+    const step = Math.max(1, Math.floor(totalPixels / sampleSize));
+    for (let i = 0; i < totalPixels; i += step) {
+        const idx = i * channels;
         const a = channels === 4 ? buffer[idx + 3] : 255;
         if (a < 128) continue; // skip transparent
         samples.push([buffer[idx], buffer[idx + 1], buffer[idx + 2]]);
+        if (samples.length >= sampleSize) break;
     }
     if (samples.length === 0) return [[0, 0, 0]];
 
@@ -208,8 +249,8 @@ function quantize(buffer, channels, k) {
         }
     }
 
-    // Iterate
-    for (let iter = 0; iter < 15; iter++) {
+    // Iterate more for better convergence
+    for (let iter = 0; iter < 30; iter++) {
         const clusters = centroids.map(() => []);
         for (const s of samples) {
             let minD = Infinity, best = 0;
@@ -219,12 +260,19 @@ function quantize(buffer, channels, k) {
             }
             clusters[best].push(s);
         }
+
+        let changed = false;
         for (let c = 0; c < centroids.length; c++) {
             if (clusters[c].length === 0) continue;
-            centroids[c] = clusters[c]
+            const newC = clusters[c]
                 .reduce((acc, v) => [acc[0] + v[0], acc[1] + v[1], acc[2] + v[2]], [0, 0, 0])
                 .map((v) => Math.round(v / clusters[c].length));
+            if (newC[0] !== centroids[c][0] || newC[1] !== centroids[c][1] || newC[2] !== centroids[c][2]) {
+                changed = true;
+                centroids[c] = newC;
+            }
         }
+        if (!changed) break; // Converged early
     }
 
     return centroids;
