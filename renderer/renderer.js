@@ -10,9 +10,16 @@ const svgPreview = document.getElementById('svg-preview');
 const svgLoading = document.getElementById('svg-loading');
 const btnBrowse = document.getElementById('btn-browse');
 const btnConvert = document.getElementById('btn-convert');
+const btnCrop = document.getElementById('btn-crop');
 const btnExport = document.getElementById('btn-export');
 const btnNew = document.getElementById('btn-new');
 const toast = document.getElementById('toast');
+
+const cropOverlay = document.getElementById('crop-overlay');
+const cropRect = document.getElementById('crop-rect');
+const cropToolbar = document.getElementById('crop-toolbar');
+const btnCropApply = document.getElementById('btn-crop-apply');
+const btnCropCancel = document.getElementById('btn-crop-cancel');
 
 const sliderColors = document.getElementById('slider-colors');
 const sliderThreshold = document.getElementById('slider-threshold');
@@ -35,6 +42,8 @@ const modeBtns = document.querySelectorAll('.mode-btn');
 let currentFilePath = null;
 let currentSvgString = null;
 let currentMode = 'color';
+let isCropping = false;
+let cropStart = null;
 
 // ─── Slider value display ──────────────────────────────────
 sliderColors.addEventListener('input', () => { valColors.textContent = sliderColors.value; });
@@ -72,8 +81,6 @@ dropzone.addEventListener('drop', async (e) => {
     dropzone.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
     if (!file) return;
-
-    // Electron gives us the path via the File object
     const filePath = file.path;
     if (!filePath) {
         showToast('Could not read file path', 'error');
@@ -93,26 +100,24 @@ async function loadImage(filePath) {
     currentFilePath = filePath;
     currentSvgString = null;
     btnExport.disabled = true;
+    btnCrop.disabled = true;
 
-    // Show original image
     const dataUrl = await window.api.getImageDataUrl(filePath);
     if (!dataUrl) {
         showToast('Failed to read image file', 'error');
         return;
     }
     imgOriginal.src = dataUrl;
-    svgPreview.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">Click "Convert" to generate SVG</p>';
+    svgPreview.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">Generating SVG…</p>';
 
-    // Switch to editor view
     dropzone.classList.add('hidden');
     dropzone.classList.remove('active');
     editor.classList.remove('hidden');
 
-    // Auto-convert
     await convertImage();
 }
 
-// ─── Convert ───────────────────────────────────────────────
+// ─── Convert (Apply Settings) ──────────────────────────────
 btnConvert.addEventListener('click', convertImage);
 
 async function convertImage() {
@@ -121,6 +126,7 @@ async function convertImage() {
     svgLoading.classList.remove('hidden');
     btnConvert.disabled = true;
     btnExport.disabled = true;
+    btnCrop.disabled = true;
 
     const options = {
         mode: currentMode,
@@ -141,7 +147,8 @@ async function convertImage() {
         currentSvgString = result.svg;
         svgPreview.innerHTML = result.svg;
         btnExport.disabled = false;
-        showToast('Conversion complete ✓', 'success');
+        btnCrop.disabled = false;
+        showToast('SVG updated ✓', 'success');
     } else {
         svgPreview.innerHTML = `<p style="color:var(--error);font-size:12px;padding:20px;">${result.error}</p>`;
         showToast('Conversion failed', 'error');
@@ -171,11 +178,130 @@ btnNew.addEventListener('click', () => {
     imgOriginal.src = '';
     svgPreview.innerHTML = '';
     btnExport.disabled = true;
+    btnCrop.disabled = true;
+    exitCropMode();
 
     editor.classList.add('hidden');
     dropzone.classList.remove('hidden');
     dropzone.classList.add('active');
 });
+
+// ═══════════════════════════════════════════════════════════
+//  Crop Tool
+// ═══════════════════════════════════════════════════════════
+
+btnCrop.addEventListener('click', () => {
+    if (!currentSvgString) return;
+    enterCropMode();
+});
+
+btnCropCancel.addEventListener('click', exitCropMode);
+
+btnCropApply.addEventListener('click', () => {
+    applyCrop();
+    exitCropMode();
+});
+
+function enterCropMode() {
+    isCropping = true;
+    cropOverlay.classList.add('active');
+    cropToolbar.classList.add('visible');
+    cropRect.style.display = 'none';
+    showToast('Click and drag to select crop area', 'success');
+}
+
+function exitCropMode() {
+    isCropping = false;
+    cropOverlay.classList.remove('active');
+    cropToolbar.classList.remove('visible');
+    cropRect.style.display = 'none';
+    cropStart = null;
+}
+
+// Mouse events for crop rectangle
+cropOverlay.addEventListener('mousedown', (e) => {
+    const rect = cropOverlay.getBoundingClientRect();
+    cropStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    cropRect.style.left = cropStart.x + 'px';
+    cropRect.style.top = cropStart.y + 'px';
+    cropRect.style.width = '0';
+    cropRect.style.height = '0';
+    cropRect.style.display = 'block';
+});
+
+cropOverlay.addEventListener('mousemove', (e) => {
+    if (!cropStart) return;
+    const rect = cropOverlay.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const x = Math.min(cropStart.x, mx);
+    const y = Math.min(cropStart.y, my);
+    const w = Math.abs(mx - cropStart.x);
+    const h = Math.abs(my - cropStart.y);
+
+    cropRect.style.left = x + 'px';
+    cropRect.style.top = y + 'px';
+    cropRect.style.width = w + 'px';
+    cropRect.style.height = h + 'px';
+});
+
+cropOverlay.addEventListener('mouseup', () => {
+    cropStart = null;
+});
+
+function applyCrop() {
+    if (!currentSvgString) return;
+
+    const svgEl = svgPreview.querySelector('svg');
+    if (!svgEl) return;
+
+    const overlayRect = cropOverlay.getBoundingClientRect();
+    const svgRect = svgEl.getBoundingClientRect();
+    const cropRectEl = cropRect.getBoundingClientRect();
+
+    // Bail if crop rect is too small
+    if (cropRectEl.width < 5 || cropRectEl.height < 5) {
+        showToast('Crop area too small', 'error');
+        return;
+    }
+
+    // Get the SVG viewBox
+    const vb = svgEl.viewBox.baseVal;
+    const svgW = vb.width || svgEl.width.baseVal.value;
+    const svgH = vb.height || svgEl.height.baseVal.value;
+
+    // Calculate scale from display to viewBox coordinates
+    const scaleX = svgW / svgRect.width;
+    const scaleY = svgH / svgRect.height;
+
+    // Crop rect position relative to the SVG element
+    const cx = (cropRectEl.left - svgRect.left) * scaleX + (vb.x || 0);
+    const cy = (cropRectEl.top - svgRect.top) * scaleY + (vb.y || 0);
+    const cw = cropRectEl.width * scaleX;
+    const ch = cropRectEl.height * scaleY;
+
+    // Clamp to SVG bounds
+    const newX = Math.max(0, cx);
+    const newY = Math.max(0, cy);
+    const newW = Math.min(cw, svgW - newX);
+    const newH = Math.min(ch, svgH - newY);
+
+    // Update the SVG viewBox to crop
+    const newViewBox = `${newX.toFixed(1)} ${newY.toFixed(1)} ${newW.toFixed(1)} ${newH.toFixed(1)}`;
+
+    currentSvgString = currentSvgString.replace(
+        /viewBox="[^"]*"/,
+        `viewBox="${newViewBox}"`
+    );
+    // Also update width/height attributes
+    currentSvgString = currentSvgString
+        .replace(/\bwidth="[^"]*"/, `width="${Math.round(newW)}"`)
+        .replace(/\bheight="[^"]*"/, `height="${Math.round(newH)}"`);
+
+    svgPreview.innerHTML = currentSvgString;
+    showToast('SVG cropped ✓', 'success');
+}
 
 // ─── Toast ─────────────────────────────────────────────────
 let toastTimer;

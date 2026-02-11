@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,20 +8,23 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet" />
 </head>
+
 <body>
 
   <!-- ─── Titlebar ─────────────────────────────────────────── -->
   <header id="titlebar">
     <div class="titlebar-drag"></div>
     <div class="titlebar-brand">
-      <svg class="logo-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/>
-        <line x1="12" y1="22" x2="12" y2="15.5"/>
-        <polyline points="22 8.5 12 15.5 2 8.5"/>
-        <polyline points="2 15.5 12 8.5 22 15.5"/>
-        <line x1="12" y1="2" x2="12" y2="8.5"/>
+      <svg class="logo-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2" />
+        <line x1="12" y1="22" x2="12" y2="15.5" />
+        <polyline points="22 8.5 12 15.5 2 8.5" />
+        <polyline points="2 15.5 12 8.5 22 15.5" />
+        <line x1="12" y1="2" x2="12" y2="8.5" />
       </svg>
       <span class="brand-text">VectorForge</span>
     </div>
@@ -34,8 +38,8 @@
       <div class="drop-content">
         <div class="drop-icon-container">
           <svg class="drop-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="8" y="8" width="48" height="48" rx="8" stroke-dasharray="6 4"/>
-            <path d="M32 22v20M22 32h20" stroke-width="2.5" stroke-linecap="round"/>
+            <rect x="8" y="8" width="48" height="48" rx="8" stroke-dasharray="6 4" />
+            <path d="M32 22v20M22 32h20" stroke-width="2.5" stroke-linecap="round" />
           </svg>
         </div>
         <h2>Drop your image here</h2>
@@ -55,17 +59,27 @@
         </div>
         <div class="preview-divider">
           <div class="divider-line"></div>
-          <svg class="divider-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          <svg class="divider-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
           <div class="divider-line"></div>
         </div>
         <div class="preview-pane" id="pane-svg">
           <div class="pane-label">SVG Preview</div>
           <div class="pane-img-wrap" id="svg-preview-wrap">
             <div id="svg-preview"></div>
+            <div id="crop-overlay">
+              <div class="crop-rect" id="crop-rect"></div>
+            </div>
             <div id="svg-loading" class="hidden">
               <div class="spinner"></div>
               <span>Converting…</span>
             </div>
+          </div>
+          <div class="crop-toolbar" id="crop-toolbar">
+            <button id="btn-crop-apply" class="btn btn-primary">Apply Crop</button>
+            <button id="btn-crop-cancel" class="btn btn-ghost">Cancel</button>
           </div>
         </div>
       </div>
@@ -119,15 +133,36 @@
 
         <div class="sidebar-actions">
           <button id="btn-convert" class="btn btn-primary">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
-            Convert
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            Apply Settings
+          </button>
+          <button id="btn-crop" class="btn btn-accent" disabled>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6.13 1L6 16a2 2 0 0 0 2 2h15" />
+              <path d="M1 6.13L16 6a2 2 0 0 1 2 2v15" />
+            </svg>
+            Crop SVG
           </button>
           <button id="btn-export" class="btn btn-accent" disabled>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
             Export SVG
           </button>
           <button id="btn-new" class="btn btn-ghost">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
             New Image
           </button>
         </div>
@@ -140,4 +175,5 @@
 
   <script src="renderer.js"></script>
 </body>
+
 </html>
