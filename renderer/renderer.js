@@ -29,6 +29,7 @@ const sliderDetail = document.getElementById('slider-detail');
 const sliderSmooth = document.getElementById('slider-smooth');
 const sliderResolution = document.getElementById('slider-resolution');
 const chkInvert = document.getElementById('chk-invert');
+const chkRemoveBg = document.getElementById('chk-remove-bg');
 
 const valColors = document.getElementById('val-colors');
 const valThreshold = document.getElementById('val-threshold');
@@ -197,6 +198,7 @@ async function convertImage() {
         optTolerance: parseFloat(sliderSmooth.value),
         resolution: parseInt(sliderResolution.value, 10),
         invert: chkInvert.checked,
+        removeBackground: chkRemoveBg.checked,
     };
 
     const result = await window.api.convertImage(currentFilePath, options);

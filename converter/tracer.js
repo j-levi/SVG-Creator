@@ -13,8 +13,9 @@ const path = require('path');
  * @param {string}  opts.turnPolicy    – potrace turn policy
  * @param {number}  opts.turdSize      – suppress speckles smaller than this (px²)
  * @param {number}  opts.optTolerance  – curve optimisation tolerance
- * @param {boolean} opts.invert        – invert colours before tracing
- * @param {number}  opts.resolution    – max dimension to process (default 4096)
+ * @param {boolean} opts.invert           – invert colours before tracing
+ * @param {number}  opts.resolution       – max dimension to process (default 4096)
+ * @param {boolean} opts.removeBackground – drop the background colour layer (default true)
  * @returns {Promise<string>} SVG markup
  */
 async function convertImageToSvg(filePath, opts = {}) {
@@ -27,6 +28,7 @@ async function convertImageToSvg(filePath, opts = {}) {
         optTolerance = 0.2,
         invert = false,
         resolution = 4096,
+        removeBackground = true,
     } = opts;
 
     // ── 1. Preprocess with Sharp ────────────────────────────────────
@@ -48,18 +50,18 @@ async function convertImageToSvg(filePath, opts = {}) {
     pipeline = pipeline.sharpen({ sigma: 0.8 });
 
     if (mode === 'bw') {
-        return await traceBW(pipeline, { threshold, turnPolicy, turdSize, optTolerance, invert });
+        return await traceBW(pipeline, { threshold, turnPolicy, turdSize, optTolerance, invert, removeBackground });
     } else if (mode === 'posterize') {
-        return await tracePosterize(pipeline, { numColors, turnPolicy, turdSize, optTolerance });
+        return await tracePosterize(pipeline, { numColors, turnPolicy, turdSize, optTolerance, removeBackground });
     } else {
-        return await traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolerance });
+        return await traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolerance, removeBackground });
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════
 //  B & W  tracing
 // ═══════════════════════════════════════════════════════════════════
-function traceBW(pipeline, { threshold, turnPolicy, turdSize, optTolerance, invert }) {
+function traceBW(pipeline, { threshold, turnPolicy, turdSize, optTolerance, invert, removeBackground }) {
     return new Promise(async (resolve, reject) => {
         let buf = await pipeline.greyscale().png().toBuffer();
 
@@ -69,7 +71,9 @@ function traceBW(pipeline, { threshold, turnPolicy, turdSize, optTolerance, inve
             turdSize,
             optTolerance,
             color: invert ? '#ffffff' : '#000000',
-            background: invert ? '#000000' : 'transparent',
+            background: removeBackground
+                ? 'transparent'
+                : (invert ? '#000000' : '#ffffff'),
         };
 
         potrace.trace(buf, traceOpts, (err, svg) => {
@@ -82,7 +86,7 @@ function traceBW(pipeline, { threshold, turnPolicy, turdSize, optTolerance, inve
 // ═══════════════════════════════════════════════════════════════════
 //  Posterize tracing (built-in potrace posterize)
 // ═══════════════════════════════════════════════════════════════════
-function tracePosterize(pipeline, { numColors, turnPolicy, turdSize, optTolerance }) {
+function tracePosterize(pipeline, { numColors, turnPolicy, turdSize, optTolerance, removeBackground }) {
     return new Promise(async (resolve, reject) => {
         const buf = await pipeline.png().toBuffer();
 
@@ -92,6 +96,7 @@ function tracePosterize(pipeline, { numColors, turnPolicy, turdSize, optToleranc
             turdSize,
             optTolerance,
             fillStrategy: potrace.Potrace.FILL_DOMINANT,
+            background: removeBackground ? 'transparent' : undefined,
         };
 
         potrace.posterize(buf, traceOpts, (err, svg) => {
@@ -104,7 +109,7 @@ function tracePosterize(pipeline, { numColors, turnPolicy, turdSize, optToleranc
 // ═══════════════════════════════════════════════════════════════════
 //  Full-colour tracing  (quantize → per-layer trace → composite)
 // ═══════════════════════════════════════════════════════════════════
-async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolerance }) {
+async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolerance, removeBackground }) {
     // Get image as raw RGBA pixels
     const processed = pipeline.png();
     const { data: rawBuf, info } = await processed.raw().toBuffer({ resolveWithObject: true });
@@ -153,6 +158,9 @@ async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolera
         // Skip colours with very few pixels
         if (freq[ci] < 10) continue;
 
+        // When removing background, skip the background colour layer
+        if (removeBackground && ci === bgIndex) continue;
+
         const bitmapBuf = Buffer.alloc(width * height);
         for (let i = 0; i < totalPixels; i++) {
             bitmapBuf[i] = assignments[i] === ci ? 0 : 255; // 0 = foreground
@@ -181,12 +189,18 @@ async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolera
         if (pathMatch) pathsSvg.push(...pathMatch);
     }
 
-    // The first layer (background) is rendered as a full rect to prevent gaps
-    const bgColor = rgbToHex(palette[bgIndex]);
-    const bgRect = `<rect width="${width}" height="${height}" fill="${bgColor}"/>`;
-
     // Compose final SVG
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n${bgRect}\n${pathsSvg.join('\n')}\n</svg>`;
+    let innerContent = '';
+    if (!removeBackground) {
+        // Solid background rect to prevent gaps
+        const bgColor = rgbToHex(palette[bgIndex]);
+        innerContent = `<rect width="${width}" height="${height}" fill="${bgColor}"/>\n`;
+    }
+    innerContent += pathsSvg.join('\n');
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+${innerContent}
+</svg>`;
 }
 
 // ─── Colour helpers ─────────────────────────────────────────────
