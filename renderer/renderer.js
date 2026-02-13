@@ -39,6 +39,8 @@ const valResolution = document.getElementById('val-resolution');
 
 const sectionColors = document.getElementById('section-colors');
 const sectionThreshold = document.getElementById('section-threshold');
+const sectionColorEditor = document.getElementById('section-color-editor');
+const colorSwatchesContainer = document.getElementById('color-swatches');
 const modeBtns = document.querySelectorAll('.mode-btn');
 const sidebar = document.getElementById('sidebar');
 
@@ -139,6 +141,9 @@ async function loadSvg(filePath) {
     btnCrop.disabled = false;
     btnConvert.style.display = 'none'; // no conversion for SVG
 
+    // Build color editor for SVG editing
+    buildColorSwatches();
+
     // Show editor
     dropzone.classList.add('hidden');
     dropzone.classList.remove('active');
@@ -211,6 +216,7 @@ async function convertImage() {
         svgPreview.innerHTML = result.svg;
         btnExport.disabled = false;
         btnCrop.disabled = false;
+        buildColorSwatches();
         showToast('SVG updated ✓', 'success');
     } else {
         svgPreview.innerHTML = `<p style="color:var(--error);font-size:12px;padding:20px;">${result.error}</p>`;
@@ -244,6 +250,7 @@ btnNew.addEventListener('click', () => {
     btnExport.disabled = true;
     btnCrop.disabled = true;
     exitCropMode();
+    clearColorSwatches();
 
     // Restore full UI
     paneOriginal.style.display = '';
@@ -385,6 +392,82 @@ function applyCrop() {
 
     svgPreview.innerHTML = currentSvgString;
     showToast('SVG cropped ✓', 'success');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Color Editor
+// ═══════════════════════════════════════════════════════════
+
+function buildColorSwatches() {
+    colorSwatchesContainer.innerHTML = '';
+
+    if (!currentSvgString) {
+        sectionColorEditor.style.display = 'none';
+        return;
+    }
+
+    // Extract unique fill/color hex values from the SVG
+    const colorRegex = /(?:fill|color)=["'](#[0-9a-fA-F]{3,8})["']/gi;
+    const colorsSet = new Set();
+    let match;
+    while ((match = colorRegex.exec(currentSvgString)) !== null) {
+        colorsSet.add(match[1].toLowerCase());
+    }
+
+    // Also check for fill in style attributes
+    const styleRegex = /fill:\s*(#[0-9a-fA-F]{3,8})/gi;
+    while ((match = styleRegex.exec(currentSvgString)) !== null) {
+        colorsSet.add(match[1].toLowerCase());
+    }
+
+    const colors = [...colorsSet];
+    if (colors.length === 0) {
+        sectionColorEditor.style.display = 'none';
+        return;
+    }
+
+    sectionColorEditor.style.display = '';
+
+    colors.forEach((hex) => {
+        // Normalize 3-char hex to 6-char for the color picker
+        const fullHex = hex.length === 4
+            ? '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3]
+            : hex;
+
+        const swatch = document.createElement('div');
+        swatch.className = 'color-swatch';
+        swatch.style.backgroundColor = fullHex;
+        swatch.title = fullHex;
+
+        const picker = document.createElement('input');
+        picker.type = 'color';
+        picker.value = fullHex.slice(0, 7); // color input only supports 6-char hex
+
+        picker.addEventListener('input', () => {
+            const newColor = picker.value;
+            replaceColorInSvg(hex, newColor);
+            swatch.style.backgroundColor = newColor;
+            swatch.title = newColor;
+        });
+
+        swatch.appendChild(picker);
+        colorSwatchesContainer.appendChild(swatch);
+    });
+}
+
+function replaceColorInSvg(oldColor, newColor) {
+    if (!currentSvgString) return;
+
+    // Replace all occurrences of the old color (case insensitive)
+    const escaped = oldColor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'gi');
+    currentSvgString = currentSvgString.replace(regex, newColor);
+    svgPreview.innerHTML = currentSvgString;
+}
+
+function clearColorSwatches() {
+    colorSwatchesContainer.innerHTML = '';
+    sectionColorEditor.style.display = 'none';
 }
 
 // ─── Toast ─────────────────────────────────────────────────
