@@ -150,6 +150,14 @@ async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolera
         return freq[b] - freq[a];
     });
 
+    // When removing background, flood-fill from edges to find border-connected
+    // background pixels. Interior pixels of the same colour (e.g. white rope
+    // inside a dark logo) are kept as foreground.
+    let bgMask = null; // 1 = edge-connected background pixel
+    if (removeBackground) {
+        bgMask = floodFillEdgeBg(assignments, width, height, bgIndex);
+    }
+
     // Build layers: one greyscale bitmap per colour
     const pathsSvg = [];
 
@@ -158,12 +166,24 @@ async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolera
         // Skip colours with very few pixels
         if (freq[ci] < 10) continue;
 
-        // When removing background, skip the background colour layer
-        if (removeBackground && ci === bgIndex) continue;
-
         const bitmapBuf = Buffer.alloc(width * height);
-        for (let i = 0; i < totalPixels; i++) {
-            bitmapBuf[i] = assignments[i] === ci ? 0 : 255; // 0 = foreground
+
+        if (removeBackground && ci === bgIndex) {
+            // Only render interior (non-edge-connected) pixels of this colour
+            let hasInterior = false;
+            for (let i = 0; i < totalPixels; i++) {
+                if (assignments[i] === ci && !bgMask[i]) {
+                    bitmapBuf[i] = 0; // foreground
+                    hasInterior = true;
+                } else {
+                    bitmapBuf[i] = 255;
+                }
+            }
+            if (!hasInterior) continue; // nothing left after removing edge bg
+        } else {
+            for (let i = 0; i < totalPixels; i++) {
+                bitmapBuf[i] = assignments[i] === ci ? 0 : 255; // 0 = foreground
+            }
         }
 
         const greyPng = await sharp(bitmapBuf, { raw: { width, height, channels: 1 } })
@@ -201,6 +221,66 @@ async function traceColor(pipeline, { numColors, turnPolicy, turdSize, optTolera
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
 ${innerContent}
 </svg>`;
+}
+
+// ─── Edge-connected flood fill (BFS) ────────────────────────────
+// Marks all pixels of colour `bgIndex` reachable from the image border.
+// Interior pixels of the same colour are NOT marked (kept as foreground).
+
+function floodFillEdgeBg(assignments, width, height, bgIndex) {
+    const total = width * height;
+    const mask = new Uint8Array(total); // 0 = keep, 1 = edge-connected bg
+    const queue = new Int32Array(total);
+    let qHead = 0, qTail = 0;
+
+    // Seed: all border pixels that match bgIndex
+    for (let x = 0; x < width; x++) {
+        const top = x;
+        if (assignments[top] === bgIndex && !mask[top]) {
+            mask[top] = 1; queue[qTail++] = top;
+        }
+        const bot = (height - 1) * width + x;
+        if (assignments[bot] === bgIndex && !mask[bot]) {
+            mask[bot] = 1; queue[qTail++] = bot;
+        }
+    }
+    for (let y = 1; y < height - 1; y++) {
+        const left = y * width;
+        if (assignments[left] === bgIndex && !mask[left]) {
+            mask[left] = 1; queue[qTail++] = left;
+        }
+        const right = y * width + (width - 1);
+        if (assignments[right] === bgIndex && !mask[right]) {
+            mask[right] = 1; queue[qTail++] = right;
+        }
+    }
+
+    // BFS through adjacent bgIndex pixels
+    while (qHead < qTail) {
+        const idx = queue[qHead++];
+        const x = idx % width;
+        const y = (idx - x) / width;
+
+        // 4-connected neighbours
+        if (x > 0) {
+            const ni = idx - 1;
+            if (!mask[ni] && assignments[ni] === bgIndex) { mask[ni] = 1; queue[qTail++] = ni; }
+        }
+        if (x < width - 1) {
+            const ni = idx + 1;
+            if (!mask[ni] && assignments[ni] === bgIndex) { mask[ni] = 1; queue[qTail++] = ni; }
+        }
+        if (y > 0) {
+            const ni = idx - width;
+            if (!mask[ni] && assignments[ni] === bgIndex) { mask[ni] = 1; queue[qTail++] = ni; }
+        }
+        if (y < height - 1) {
+            const ni = idx + width;
+            if (!mask[ni] && assignments[ni] === bgIndex) { mask[ni] = 1; queue[qTail++] = ni; }
+        }
+    }
+
+    return mask;
 }
 
 // ─── Colour helpers ─────────────────────────────────────────────
